@@ -1,0 +1,5 @@
+{
+  "name": "Note",
+  "description": "تطبيق دردشة فورية مع مكالمات فيديو، بحث عن المستخدمين، وستريك.",
+  "requestFramePermissions": ["camera", "microphone"]
+}

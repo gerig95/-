@@ -1,0 +1,105 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "lastSeen": { "type": "string", "format": "date-time" },
+        "searchKeywords": { "type": "array", "items": { "type": "string" } },
+        "theme": { "type": "string", "enum": ["zinc", "blue", "green", "purple", "rose"] },
+        "chatBackground": { "type": "string" }
+      },
+      "required": ["uid", "displayName"]
+    },
+    "Chat": {
+      "title": "Chat",
+      "description": "A conversation between users",
+      "type": "object",
+      "properties": {
+        "participants": { "type": "array", "items": { "type": "string" } },
+        "lastMessage": { "type": "string" },
+        "lastMessageAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["participants"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "A single message in a chat",
+      "type": "object",
+      "properties": {
+        "chatId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "reactions": {
+          "type": "object",
+          "description": "Map of emoji to array of user IDs",
+          "additionalProperties": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      },
+      "required": ["chatId", "senderId", "text", "createdAt"]
+    },
+    "Streak": {
+      "title": "Streak",
+      "description": "Tracking daily interaction between two users",
+      "type": "object",
+      "properties": {
+        "user1": { "type": "string" },
+        "user2": { "type": "string" },
+        "count": { "type": "number" },
+        "lastInteraction": { "type": "string", "format": "date-time" }
+      },
+      "required": ["user1", "user2", "count", "lastInteraction"]
+    },
+    "Call": {
+      "title": "Call",
+      "description": "Signaling data for WebRTC calls",
+      "type": "object",
+      "properties": {
+        "callerId": { "type": "string" },
+        "receiverId": { "type": "string" },
+        "status": { "type": "string", "enum": ["ringing", "accepted", "rejected", "ended"] },
+        "offer": { "type": "object" },
+        "answer": { "type": "object" }
+      },
+      "required": ["callerId", "receiverId", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/chats/{chatId}": {
+      "schema": "Chat",
+      "description": "Chat metadata"
+    },
+    "/chats/{chatId}/messages/{messageId}": {
+      "schema": "Message",
+      "description": "Messages within a chat"
+    },
+    "/streaks/{streakId}": {
+      "schema": "Streak",
+      "description": "User interaction streaks"
+    },
+    "/calls/{callId}": {
+      "schema": "Call",
+      "description": "WebRTC call signaling"
+    },
+    "/calls/{callId}/callerCandidates/{id}": {
+      "schema": { "type": "object" },
+      "description": "ICE candidates from caller"
+    },
+    "/calls/{callId}/receiverCandidates/{id}": {
+      "schema": { "type": "object" },
+      "description": "ICE candidates from receiver"
+    }
+  }
+}

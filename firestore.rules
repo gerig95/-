@@ -1,0 +1,181 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Fields:
+    //   - uid: string (required)
+    //   - displayName: string (required)
+    //   - photoURL: string
+    //   - lastSeen: timestamp
+    //   - searchKeywords: list<string>
+    //
+    // Collection: chats
+    // Fields:
+    //   - participants: list<string> (required)
+    //   - lastMessage: string
+    //   - lastMessageAt: timestamp
+    //
+    // Collection: chats/{chatId}/messages
+    // Fields:
+    //   - chatId: string (required)
+    //   - senderId: string (required)
+    //   - text: string (required)
+    //   - createdAt: timestamp (required)
+    //
+    // Collection: streaks
+    // Fields:
+    //   - user1: string (required)
+    //   - user2: string (required)
+    //   - count: number (required)
+    //   - lastInteraction: timestamp (required)
+    //
+    // Collection: calls
+    // Fields:
+    //   - callerId: string (required)
+    //   - receiverId: string (required)
+    //   - status: string (required, enum)
+    //   - offer: map
+    //   - answer: map
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' || 
+         (request.auth.token.email == "mmmrfbdhfb@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isParticipant(participants) {
+      return isAuthenticated() && participants.hasAny([request.auth.uid]);
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // Domain Validators
+    function isValidUser(data) {
+      return data.uid is string && 
+             data.displayName is string && data.displayName.size() > 0 && data.displayName.size() < 100 &&
+             (!('photoURL' in data) || data.photoURL is string) &&
+             (!('role' in data) || data.role in ['user', 'admin']) &&
+             (!('isPrivate' in data) || data.isPrivate is bool);
+    }
+
+    function isValidChat(data) {
+      return data.participants is list && data.participants.size() >= 2 && data.participants.size() <= 10 &&
+             (!('lastMessage' in data) || (data.lastMessage is string && data.lastMessage.size() < 5000));
+    }
+
+    function isValidMessage(data) {
+      return data.chatId is string && 
+             data.senderId is string && 
+             data.text is string && data.text.size() > 0 && data.text.size() < 5000 &&
+             (!('reactions' in data) || data.reactions is map);
+    }
+
+    function isValidStreak(data) {
+      return data.user1 is string && data.user2 is string && 
+             data.count is number && data.count >= 0 &&
+             data.lastInteraction is timestamp;
+    }
+
+    function isValidCall(data) {
+      return data.callerId is string && data.receiverId is string && 
+             data.status in ['ringing', 'accepted', 'rejected', 'ended'];
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      // Allow reading profiles for chat/search
+      allow read: if isAuthenticated();
+      
+      // Only owner can create/update their own profile
+      allow create: if isOwner(userId) && isValidUser(request.resource.data) && 
+                      (!('role' in request.resource.data) || request.resource.data.role == 'user');
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && 
+                      (request.resource.data.role == resource.data.role || isAdmin());
+    }
+
+    match /chats/{chatId} {
+      // Must be a participant to read or update chat metadata
+      allow read: if isParticipant(resource.data.participants);
+      allow create: if isAuthenticated() && isValidChat(request.resource.data) && 
+                      request.auth.uid in request.resource.data.participants;
+      allow update: if isParticipant(resource.data.participants) && isValidChat(request.resource.data);
+
+      match /messages/{messageId} {
+        // Must be a participant of the parent chat
+        allow read: if isParticipant(get(/databases/$(database)/documents/chats/$(chatId)).data.participants);
+        allow create: if isParticipant(get(/databases/$(database)/documents/chats/$(chatId)).data.participants) && 
+                        isValidMessage(request.resource.data) &&
+                        request.resource.data.senderId == request.auth.uid;
+        allow update: if isParticipant(get(/databases/$(database)/documents/chats/$(chatId)).data.participants) &&
+                        isValidMessage(request.resource.data) &&
+                        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions']);
+      }
+    }
+
+    match /streaks/{streakId} {
+      // Streak ID is usually uid1_uid2
+      // Use ID matching to avoid permission-denied on non-existent docs
+      allow read: if isAuthenticated() && (
+        streakId.matches("^" + request.auth.uid + "_.*") || 
+        streakId.matches(".*_" + request.auth.uid + "$")
+      );
+      allow create: if isAuthenticated() && isValidStreak(request.resource.data) && 
+                      (request.auth.uid == request.resource.data.user1 || request.auth.uid == request.resource.data.user2);
+      allow update: if isAuthenticated() && isValidStreak(request.resource.data) && 
+                      (request.auth.uid == resource.data.user1 || request.auth.uid == resource.data.user2);
+    }
+
+    match /calls/{callId} {
+      // Allow reading if part of the call
+      // Use a more robust check that handles non-existent docs for onSnapshot
+      allow read: if isAuthenticated() && (
+        (resource != null && (request.auth.uid == resource.data.callerId || request.auth.uid == resource.data.receiverId)) ||
+        (resource == null)
+      );
+      
+      allow create: if isAuthenticated() && isValidCall(request.resource.data) && 
+                      request.auth.uid == request.resource.data.callerId;
+      
+      allow update: if isAuthenticated() && (request.auth.uid == resource.data.callerId || request.auth.uid == resource.data.receiverId) &&
+                      isValidCall(request.resource.data);
+
+      match /callerCandidates/{id} {
+        allow read, write: if isAuthenticated() && 
+          (request.auth.uid == get(/databases/$(database)/documents/calls/$(callId)).data.callerId || 
+           request.auth.uid == get(/databases/$(database)/documents/calls/$(callId)).data.receiverId);
+      }
+      match /receiverCandidates/{id} {
+        allow read, write: if isAuthenticated() && 
+          (request.auth.uid == get(/databases/$(database)/documents/calls/$(callId)).data.callerId || 
+           request.auth.uid == get(/databases/$(database)/documents/calls/$(callId)).data.receiverId);
+      }
+    }
+  }
+}
